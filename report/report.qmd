@@ -52,7 +52,7 @@ Version 2 includes the following changes:
 * Generates a bounding box based on map drawing (@sec-change2) 
 * Retains the maximum detected DHW value for a given year (@sec-change3)
 * Retains the maximum value of cyclone exposure for a given year (@sec-change4)
-* Adjusts the value of cyclone exposure if event precedes a survey (@sec-change4)
+* Adjusts the value of cyclone exposure if a survey precedes an event (@sec-change4)
 * Validates that all site locations and years received disturbance values (@sec-change5)
 * Creates shapefiles of disturbance values at each site location (@sec-change6)
 * Creates shapefiles of disturbance values at lags 0,1 and 2 at each site location (@sec-change6) 
