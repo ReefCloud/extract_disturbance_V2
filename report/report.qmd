@@ -1,0 +1,334 @@
+---
+title: "Environmental data in ReefCloud"
+subtitle: "Version 2"
+authors:
+  - name: Julie Vercelloni
+    corresponding: true
+    email: j.vercelloni@aims.gov.au
+    affiliations:
+      - ref: aims
+  - name: Manuel Gonzalez-Rivero
+    affiliations:
+      - ref: aims
+affiliations:
+  - id: aims
+    name: Australian Institute of Marine Science
+engine: knitr
+format:
+  html:
+    include-after-body: resources/toc_logo.html
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    highlight-style: atom-one
+    embed-resources: true
+    theme:
+      light: flatly
+      dark: darkly
+    code-overflow: wrap
+    code-fold: true
+    number-sections: true
+    number-depth: 2
+    shift-heading-level-by: -1
+    crossref:
+      lst-title: Code listing
+    fig-align: center
+    text-align: center
+    acm-html: default
+execute: 
+  message: false
+  warning: false
+  cache: true
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Intro 
+
+Version 2 includes the following changes: 
+
+* Creates synthetic data to simulate the number of replicates per site (@sec-change1)
+* Generates a bounding box based on map drawing (@sec-change2) 
+* Retains the maximum detected DHW value for a given year (@sec-change3)
+* Retains the maximum value of cyclone exposure for a given year (@sec-change4)
+* Adjusts the value of cyclone exposure if event precedes a survey (@sec-change4)
+* Validates that all site locations and years received disturbance values (@sec-change5)
+* Creates shapefiles of disturbance values at each site location (@sec-change6)
+* Creates shapefiles of disturbance values at lags 0,1 and 2 at each site location (@sec-change6) 
+
+```{r, chunkOpts, echo = FALSE}
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_knit$set(root.dir = "..")
+knitr::opts_chunk$set(message = FALSE)
+```
+
+## Load R packages 
+
+```{r, include = TRUE, echo = TRUE}
+#rm(list=ls())
+library(simstudy)
+library(cleaner)
+library(mapedit)
+library(mapview)
+library(sf) # simple features packages for handling vector GIS data
+library(httr) # generic webservice package
+library(tidyverse) # a suite of packages for data wrangling, transformation, plotting, ...
+library(ows4R) # interface for OGC webservices
+library(rnaturalearth) #World Map data from Natural Earth
+library(leaflet)
+library(leafem)
+```
+
+## Connect to the server
+
+```{r, include = TRUE, echo = TRUE}
+rc_geo<-"https://geoserver.apps.aims.gov.au/reefcloud/ows"
+
+rc_client <- WFSClient$new(rc_geo, 
+                           serviceVersion = "2.0.0")
+
+rc_client$getFeatureTypes(pretty = TRUE)
+
+rc_lyrs<-rc_client$getFeatureTypes() %>%
+  map_chr(function(x){x$getName()})
+
+url <- parse_url(rc_geo)
+```
+
+
+## Generate monitoring data {#sec-change1}
+
+```{r, include = TRUE, echo = TRUE}
+# Spatial
+sites<- data.frame(x=c(134.35, 134.43), y=c(7.42,7.28))%>%
+  as.matrix() %>%
+  st_multipoint() %>% 
+  st_sfc(crs=4326) %>% 
+  st_cast('POINT') %>%
+  st_sf() %>%
+  mutate(name = c("Site1", "Site2"))
+
+# Temporal 
+
+# Define parameters 
+def <- defData(varname = "xbase", dist = "normal", formula = 20, variance = 3)
+def <- defData(def, varname = "nCount", dist = "noZeroPoisson", formula = 9) #nCount defines the number of measurements per site
+def <- defData(def, varname = "mInterval", dist = "gamma", formula = 2, variance = 0.03) #mInterval specifies the average time between surveys for a site
+dt <- genData(2, def)
+
+# Create the dataset
+sites_year <- addPeriods(dt) %>%
+  mutate(year = time + 2000) %>% # assume that the monitoring started in 2000 
+  mutate(name = paste0("Site",id)) %>%
+  dplyr::select(name, year) %>%
+  left_join(sites, relationship = "many-to-many")  %>%
+  st_as_sf() 
+
+## Add a survey date 
+generate_date <- function(x){
+  rdate(1, paste0(x, "-01-01"), max = paste0(x, "-12-31"))
+}
+
+sites_year <- sites_year %>%
+  dplyr::rowwise()%>%
+  mutate(Date =  generate_date(year))
+```
+
+
+
+## Generating bounding box 
+
+### Example 1 - from known locations
+
+```{r, include = TRUE, echo = TRUE}
+my.bbox<-st_bbox(st_buffer(sites,dist = 0.1))
+
+my.bbox<- my.bbox %>%
+  as.character()%>%
+  paste(.,collapse = ',')
+```
+
+```{r, include = TRUE, echo = TRUE}
+my.bbox_plot<-st_bbox(st_buffer(sites,dist = 0.1))
+
+leaflet()%>%addExtent(data=my.bbox_plot,
+                      color = "red", 
+                      stroke=T,
+                      weight = 1, 
+                      smoothFactor = 0.5,
+                      opacity = 1.0, 
+                      fillOpacity = 0.5,
+                      fillColor = NULL,
+                      highlightOptions = highlightOptions(color = "white", weight = 2,bringToFront = TRUE))%>%
+  addMarkers(data=sites, label = ~name)%>%
+  addProviderTiles(providers$Esri.WorldImagery)
+```
+
+### Example 2 - from drawing on the map {#sec-change2}
+
+```{r, include = TRUE, echo = TRUE, eval= FALSE}
+draw <- editMap(mapview(map.types = ("Esri.WorldImagery")))
+
+# Edit on the map: 
+# 1. Select the polygon icon
+# 2. Draw a shape around area of interest
+# 3. Select "finish" beside the polygon icon 
+# 4. Select "done" at the bottom right
+
+my.bbox<-st_bbox(st_buffer(draw$finished,dist = 0.1))
+
+my.bbox<- my.bbox %>%
+  as.character()%>%
+  paste(.,collapse = ',')
+```
+
+## Environmental layer 1
+
+### Data query 
+
+```{r, include = TRUE, echo = TRUE}
+#set up your query
+url$query <- list(service = "WFS",
+                  version = "1.0.0",
+                  request = "GetFeature",
+                  typename = rc_lyrs[3], # I am selecting this layer:"reefcloud:degrees_heating_weeks_tier",
+                  bbox = my.bbox,
+                  width=768,
+                  height=330,
+                  srs="EPSG%3A4326",
+                  styles='',
+                  format="application/openlayers")
+request <- build_url(url)
+
+#request the data and set up coordinate reference
+dhw_raw <- read_sf(request)%>%st_set_crs(4326) %>%
+  filter(tier == 4)  
+```
+
+### Extract at site locations {#sec-change3}
+
+```{r, include = TRUE, echo = TRUE}
+# Intersections dwh raw with sites_year data 
+
+sites_tierid <- st_join(dhw_raw, sites) %>%
+  dplyr::select(name, tier_id) %>%
+  filter(! is.na(name)) %>%
+  st_drop_geometry()
+
+sites_year_tierid <- left_join(sites_year  %>% st_drop_geometry(),
+                               sites_tierid, relationship = "many-to-many") %>%
+  distinct()          
+
+dhw_raw_unique <- dhw_raw %>%
+  filter(tier_id %in% sites_tierid$tier_id) %>%
+  group_by(tier_id, year) %>%
+  top_n(1, dhwmax) %>%  # keep the maximum dhw values detected for each year
+  distinct() # keep only one if values are equals between detection 
+
+dhw_data <- sites_year_tierid %>%
+  left_join(dhw_raw_unique %>% 
+              dplyr::select(tier_id, year, dhwmax, severity) %>%
+              st_drop_geometry() %>%
+              `colnames<-`(c("tier_id", "year", "max_dhw", "severity_bleaching")) , by = c("tier_id", "year")) %>% 
+  replace(is.na(.), 0) 
+```
+
+## Environmental layer 2
+
+### Data query
+
+```{r, include = TRUE, echo = TRUE}
+#set up your query
+url$query <- list(service = "WFS",
+                  version = "1.0.0",
+                  request = "GetFeature",
+                  typename = rc_lyrs[6], # I am selecting this layer:"reefcloud:storm4m_exposure_year_tier",
+                  bbox = my.bbox,
+                  width=768,
+                  height=330,
+                  srs="EPSG%3A4326",
+                  styles='',
+                  format="application/openlayers")
+request <- build_url(url)
+
+#request the data and set up coordinate reference
+cyclone_raw <- read_sf(request)%>%st_set_crs(4326) %>%
+  filter(tier == 4)  %>% 
+  dplyr::select(tier_id, start_year, end_date,max_hrs, severity) %>%
+  st_drop_geometry() %>%
+  `colnames<-`(c("tier_id", "year", "end_date","max_hrs", "severity_cyclone")) 
+```
+
+### Extract at site locations {#sec-change4}
+
+```{r, include = TRUE, echo = TRUE}
+cyclone_raw_unique <- cyclone_raw %>%
+  filter(tier_id %in% sites_tierid$tier_id) %>%
+  group_by(tier_id, year) %>%
+  top_n(1, max_hrs) %>%  # keep the maximum hours values detected for each year
+  distinct() # keep only one if values are equals between cyclones 
+
+cyclone_data <- sites_year_tierid %>%
+  left_join(cyclone_raw_unique, by = c("tier_id", "year"), relationship = "many-to-many") 
+
+# adjust whether the storm date preceeds a sampling event 
+
+cyclone_data_adj <- cyclone_data %>%
+  mutate(Temp = ifelse(Date > end_date, 1, 0)) %>%
+  group_by(name) %>%
+  mutate(max_hrs = ifelse(Temp == 0, dplyr::lag(max_hrs), max_hrs)) %>%
+  dplyr::select(name, year, tier_id,max_hrs,severity_cyclone) %>% 
+  replace(is.na(.), 0) 
+```
+
+## Validation {#sec-change5}  
+
+```{r, include = TRUE, echo = TRUE}
+tal_cycl <- cyclone_data_adj %>% group_by(name) %>% tally() %>% st_drop_geometry()
+tal_bleach <- dhw_data %>% group_by(name) %>% tally()%>% st_drop_geometry()
+tal_surveys <- sites_year %>% group_by(name) %>% tally()%>% st_drop_geometry()
+
+diff <- setdiff(tal_cycl, tal_surveys)
+diff2 <- setdiff(tal_bleach, tal_surveys)
+
+if (length(diff != 0)){
+  print('STOP: Missing values of cyclone exposure in the cyclone data')
+} 
+
+if (length(diff2 != 0)){
+  print('STOP: Missing values of maximum DHW in the dhw data')
+} 
+```
+
+## Create final tables {#sec-change6}
+
+```{r, include = TRUE, echo = TRUE}
+dist_table_sf <- left_join(cyclone_data_adj, dhw_data) %>%
+  left_join(sites) %>%
+  st_as_sf()
+
+#st_write(dist_table_sf, "sf_table.shp", delete_dsn = T)
+```
+
+### Include disturbance lags 
+
+```{r, include = TRUE, echo = TRUE}
+max_lag <- 2
+
+dist_table_sf_lag <- dist_table_sf %>% 
+  pivot_longer(c(max_hrs, severity_cyclone, max_dhw, severity_bleaching), names_to = "dist", values_to = "value") %>%
+  group_by(name, year, dist) %>%
+  mutate(n_lag = list(0:max_lag)) %>%
+  tidyr::unnest(c(n_lag))  %>%
+  arrange(name, dist, n_lag, year) %>%
+  group_by(name, dist, n_lag) %>%
+  mutate(lag_val = lag(value, n_lag[1])) %>%
+  ungroup() %>%
+  mutate(var_name = ifelse(n_lag == 0, dist, paste0("Lag", dist, ".", n_lag)))%>%
+  dplyr::select(any_of(c("name", "year", "Date", "lag_val", "var_name"))) %>%
+  tidyr::pivot_wider(names_from = var_name, values_from = lag_val)
+
+#st_write(dist_table_sf_lag, "sf_table_lag.shp", delete_dsn = T)  
+```
+
