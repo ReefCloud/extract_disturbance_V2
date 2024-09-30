@@ -57,6 +57,9 @@ Version 2 includes the following changes:
 * Creates shapefiles of disturbance values at each site location (@sec-change6)
 * Creates shapefiles of disturbance values at lags 0,1 and 2 at each site location (@sec-change6) 
 
+Requirement: 
+The R package \textit{sf} minimum version is sf_1.0-16.
+
 ```{r, chunkOpts, echo = FALSE}
 knitr::opts_chunk$set(cache = TRUE)
 knitr::opts_knit$set(root.dir = "..")
