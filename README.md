@@ -1,5 +1,4 @@
-Methods comparison study
-<img src="report/resources/logo_color.png" alt="Logo" align="right" width="180">
+Extract and process disturbance layers from the ReefCloud server
 =========================================================================================
 
 <!-- badges: start -->
