@@ -1,38 +1,23 @@
-get_geoserver_info <- function() {
-rc_geo<-"https://geoserver.apps.aims.gov.au/reefcloud/ows"
-rc_client <- WFSClient$new(rc_geo, 
-                               serviceVersion = "2.0.0")
-rc_client$getFeatureTypes(pretty = TRUE)
-rc_lyrs<-rc_client$getFeatureTypes() %>%
-      map_chr(function(x){x$getName()})
-url <- parse_url(rc_geo)
-geo_info <- list(rc_lyrs = rc_lyrs, url = url)
-assign("geo_info", geo_info, env =  .GlobalEnv)
-}
-
 get_geoserver_data <- function(cov_name = NULL, sites){
-wch <- str_which(geo_info$rc_lyrs, cov_name)
+rc_url <-"https://geoserver.apps.aims.gov.au/reefcloud/ows"
 
-# create a bounding box for a spatial query.
+rc_client <- WFSClient$new(
+  url = rc_url,
+  serviceVersion = "1.0.0",
+  logger = "INFO",
+  headers = c("User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+)
+
 bbox <- st_bbox(st_buffer(sites, dist = 0.1))  %>% 
       as.character()%>%
       paste(.,collapse = ',')
 
-url <- geo_info$url
-url$query <- list(service = "WFS",
-      version = "1.0.0",
-      request = "GetFeature",
-      typename = geo_info$rc_lyrs[wch], 
-      bbox = bbox,
-      srs="EPSG%3A4326",
-      styles='',
-      format="application/openlayers")
+invisible(
+  capture.output({
+    cov_data <-  rc_client$getFeatures(cov_name, srsName = "EPSG:4326", bbox= bbox)
+  })
+)
 
-request <- build_url(url)
-# if not working use temp_file instead of request in L88.
-#temp_file <- tempfile()
-cov_data <- read_sf(request) %>% #temp_file
-        st_set_crs(4326) 
 return(cov_data)
 }
 
