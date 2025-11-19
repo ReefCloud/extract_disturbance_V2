@@ -48,6 +48,14 @@ This vignette provides reproducible R code to extract disturbance data from the 
 
 ```{r}
 #| include: true
+#| echo: false
+#| eval: true
+#| cache: false
+setwd("C:/Users/jvercell/OneDrive - Australian Institute of Marine Science/AIMS/01_Research projects/ReefCloud/RC_database_access/for_github/extract_disturbance_V2")
+```
+
+```{r}
+#| include: true
 #| echo: true
 #| eval: true
 #| cache: false
@@ -57,18 +65,6 @@ rm(list=ls())
 path <- ""
 source(paste0(path,"R/packages.R"))
 source(paste0(path,"R/functions.R"))
-```
-
-```{r}
-#| include: true
-#| echo: true
-#| eval: true
-#| cache: false
-
-########################################################################
-####################### Get geoserver info 
-########################################################################
-get_geoserver_info()
 ```
 
 ```{r}
@@ -119,18 +115,32 @@ sites_year <- sites %>%
 ########################################################################
 ####################### Extract DHW and process 
 ########################################################################
-# Get bounding box from sites
 bbox <- st_bbox(sites) %>% st_as_sfc()
 
+# Get information for accessing the Geoserver
+get_geoserver_info()
+
+# Get bounding box from sites
 sf_use_s2(FALSE)
-cov_dhw_full <- get_geoserver_data(cov_name = "reefcloud:degrees_heating_weeks_tier", sites)  %>%
+cov_dhw_full <- get_geoserver_data(cov_name = "reefcloud:degrees_heating_weeks_tier", sites,
+                                rc_client = rc_client,
+                                timeout_seconds = GEOSERVER_DEFAULT_TIMEOUT,
+                                initial_chunk_size = GEOSERVER_DEFAULT_CHUNK_SIZE)  %>%
   filter(tier == 4)  %>%
-  st_make_valid() %>%
-  filter(st_intersects(geometry, bbox, sparse = FALSE)) %>%
+  sf::st_make_valid() 
+  
+# Ensure CRS compatibility
+if (is.na(sf::st_crs(cov_dhw_full))) {
+        cov_dhw_full <- sf::st_set_crs(cov_dhw_full, 4326)
+      }
+ 
+cov_dhw_full <- cov_dhw_full  %>%
+  filter(sf::st_intersects(geometry, bbox, sparse = FALSE)) %>%
   rename(max_dhw = dhwmax,
          end_date = latest)
 
 sf::sf_use_s2(TRUE)
+
 # Find matching years
 years <- intersect(unique(sites_year$year), unique(cov_dhw_full$year))
 
@@ -168,9 +178,20 @@ glimpse(cov_dhw)
 ####################### Extract cyclone and process
 ########################################################################
 sf_use_s2(FALSE)
-cov_cyc_full <- get_geoserver_data(cov_name = "reefcloud:storm4m_exposure_year_tier", sites) %>%
+cov_cyc_full <- get_geoserver_data(cov_name = "reefcloud:storm4m_exposure_year_tier", sites,
+                                rc_client = rc_client,
+                                timeout_seconds = GEOSERVER_DEFAULT_TIMEOUT,
+                                initial_chunk_size = GEOSERVER_DEFAULT_CHUNK_SIZE) %>%
   filter(tier == 4) %>%
-  st_simplify(dTolerance = 0.001) %>%
+  st_simplify(dTolerance = 0.001) 
+  
+# Ensure CRS compatibility
+if (is.na(sf::st_crs(cov_cyc_full))) {
+        cov_cyc_full <- sf::st_set_crs(cov_cyc_full, 4326)
+      }
+
+  
+cov_cyc_full <- cov_cyc_full %>%
   filter(st_intersects(geometry, bbox, sparse = FALSE)) %>%
   rename(max_cyc = max_hrs,
          year = end_year)
