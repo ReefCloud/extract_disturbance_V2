@@ -80,10 +80,10 @@ source(paste0(path,"R/functions.R"))
 #Generate sites 
 sites<- data.frame(x=c(143.2579, 145.571, 152.3724), y=c(-11.02353, -16.38352, -23.84812)) %>%
   as.matrix() %>%
-  st_multipoint() %>% 
-  st_sfc(crs=4326) %>% 
-  st_cast('POINT') %>%
-  st_sf(name=c("Site1", "Site2", "Site3"))
+  sf::st_multipoint() %>% 
+  sf::st_sfc(crs=4326) %>% 
+  sf::st_cast('POINT') %>%
+  sf::st_sf(name=c("Site1", "Site2", "Site3"))
 
 # Generate random years for each site (example: 15 random years per site)
 set.seed(123) 
@@ -98,13 +98,13 @@ random_dates <- lapply(sites$name, function(site_name) {
     year = years,
     date = as.Date(paste(years, months, days, sep = "-"))
   )
-}) %>% bind_rows()
+}) %>% dplyr::bind_rows()
 
 # Join with sites and arrange
 sites_year <- sites %>%
-  right_join(random_dates, by = "name") %>%
-  arrange(name, date) %>%
-  rename(geometry = ".")
+  dplyr::right_join(random_dates, by = "name") %>%
+  dplyr::arrange(name, date) %>%
+  dplyr::rename(geometry = ".")
 ``` 
 
 ```{r}
@@ -116,7 +116,7 @@ sites_year <- sites %>%
 ########################################################################
 ####################### Extract DHW and process 
 ########################################################################
-bbox <- st_bbox(sites) %>% st_as_sfc()
+bbox <- sf::st_bbox(sites) %>% sf::st_as_sfc()
 
 # Get information for accessing the Geoserver
 get_geoserver_info()
@@ -127,7 +127,7 @@ cov_dhw_full <- get_geoserver_data(cov_name = "reefcloud:degrees_heating_weeks_t
                                 rc_client = rc_client,
                                 timeout_seconds = GEOSERVER_DEFAULT_TIMEOUT,
                                 initial_chunk_size = GEOSERVER_DEFAULT_CHUNK_SIZE)  %>%
-  filter(tier == 4)  %>%
+  dplyr::filter(tier == 4)  %>%
   sf::st_make_valid() 
   
 # Ensure CRS compatibility
@@ -136,8 +136,8 @@ if (is.na(sf::st_crs(cov_dhw_full))) {
       }
  
 cov_dhw_full <- cov_dhw_full  %>%
-  filter(sf::st_intersects(geometry, bbox, sparse = FALSE)) %>%
-  rename(max_dhw = dhwmax,
+  dplyr::filter(sf::st_intersects(geometry, bbox, sparse = FALSE)) %>%
+  dplyr::rename(max_dhw = dhwmax,
          end_date = latest)
 
 sf::sf_use_s2(TRUE)
@@ -146,13 +146,13 @@ sf::sf_use_s2(TRUE)
 years <- intersect(unique(sites_year$year), unique(cov_dhw_full$year))
 
 # Loop over each year and spatially join
-sites_with_tier <- map_dfr(years, function(y) {
-  sites_sub <- sites_year %>% filter(year == y)
-  dhw_sub <- cov_dhw_full  %>% filter(year == y)
+sites_with_tier <- purrr::map_dfr(years, function(y) {
+  sites_sub <- sites_year %>% dplyr::filter(year == y)
+  dhw_sub <- cov_dhw_full  %>% dplyr::filter(year == y)
   
   # Only run join if both subsets are non-empty
   if (nrow(sites_sub) > 0 && nrow(dhw_sub) > 0) {
-    st_join(sites_sub, dhw_sub, join = st_within, left = FALSE)
+    sf::st_join(sites_sub, dhw_sub, join = st_within, left = FALSE)
   } else {
     NULL  # skip if empty
   }
@@ -162,11 +162,11 @@ sites_with_tier <- map_dfr(years, function(y) {
 #setequal(sites_with_tier$year.x, sites_with_tier$year.y)
 
 sites_with_tier <- sites_with_tier %>%
- rename(year = year.x) %>%
+ dplyr::rename(year = year.x) %>%
  dplyr::select(- year.y)
 
 cov_dhw <- add_cov_to_data(data = sites_with_tier, cov = cov_dhw_full, cov_name = "dhw")
-glimpse(cov_dhw)
+dplyr::glimpse(cov_dhw)
 ```
 
 
@@ -183,8 +183,8 @@ cov_cyc_full <- get_geoserver_data(cov_name = "reefcloud:storm4m_exposure_year_t
                                 rc_client = rc_client,
                                 timeout_seconds = GEOSERVER_DEFAULT_TIMEOUT,
                                 initial_chunk_size = GEOSERVER_DEFAULT_CHUNK_SIZE) %>%
-  filter(tier == 4) %>%
-  st_simplify(dTolerance = 0.001) 
+  dplyr::filter(tier == 4) %>%
+  sf::st_simplify(dTolerance = 0.001) 
   
 # Ensure CRS compatibility
 if (is.na(sf::st_crs(cov_cyc_full))) {
@@ -193,8 +193,8 @@ if (is.na(sf::st_crs(cov_cyc_full))) {
 
   
 cov_cyc_full <- cov_cyc_full %>%
-  filter(st_intersects(geometry, bbox, sparse = FALSE)) %>%
-  rename(max_cyc = max_hrs,
+  dplyr::filter(st_intersects(geometry, bbox, sparse = FALSE)) %>%
+  dplyr::rename(max_cyc = max_hrs,
          year = end_year)
 
 sf::sf_use_s2(TRUE)
@@ -202,13 +202,13 @@ sf::sf_use_s2(TRUE)
 years <- intersect(unique(sites_year$year), unique(cov_cyc_full$year))
 
 # Loop over each year and spatially join
-sites_with_tier <- map_dfr(years, function(y) {
-  sites_sub <- sites_year %>% filter(year == y)
-  cyc_sub <- cov_cyc_full  %>% filter(year == y)
+sites_with_tier <- purrr::map_dfr(years, function(y) {
+  sites_sub <- sites_year %>% dplyr::filter(year == y)
+  cyc_sub <- cov_cyc_full  %>% dplyr::filter(year == y)
   
   # Only run join if both subsets are non-empty
   if (nrow(sites_sub) > 0 && nrow(cyc_sub) > 0) {
-    st_join(sites_sub, cyc_sub, join = st_within, left = FALSE)
+    sf::st_join(sites_sub, cyc_sub, join = st_within, left = FALSE)
   } else {
     NULL  # skip if empty
   }
@@ -218,9 +218,9 @@ sites_with_tier <- map_dfr(years, function(y) {
 #setequal(sites_with_tier$year.x, sites_with_tier$year.y)
 
 sites_with_tier <- sites_with_tier %>%
- rename(year = year.x) %>%
+ dplyr::rename(year = year.x) %>%
  dplyr::select(- year.y)
 
 cov_cyc <- add_cov_to_data(data = sites_with_tier, cov = cov_cyc_full, cov_name = "cyc")
-glimpse(cov_cyc)
+dplyr::glimpse(cov_cyc)
 ```
