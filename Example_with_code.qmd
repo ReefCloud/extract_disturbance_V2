@@ -6,6 +6,7 @@ author:
     corresponding: true
     email: j.vercelloni@aims.gov.au
   - name: Murray Logan
+  - name: Aleksandar Zivaljevic
   - name: Manuel Gonzalez-Rivero
 engine: knitr
 format:

@@ -41,21 +41,7 @@ get_geoserver_info <- function() {
   invisible(NULL)
 }
 
-# get_geoserver_data <- function(cov_name = NULL, sites){
-
-# bbox <- st_bbox(st_buffer(sites, dist = 0.1))  %>% 
-#       as.character()%>%
-#       paste(.,collapse = ',')
-
-# invisible(
-#   capture.output({
-#     cov_data <-  rc_client$getFeatures(cov_name, srsName = "EPSG:4326", bbox= bbox)
-#   })
-# )
-
-# return(cov_data)
-# }
-
+# Variables to change if needed - depending of the size of bbox and number of replicated years
 GEOSERVER_DEFAULT_TIMEOUT <- 60 # in seconds
 GEOSERVER_DEFAULT_CHUNK_SIZE <- 10000 # initial chunk size
 GEOSERVER_BACKOFF_BASE <- 2 # exponential backoff
